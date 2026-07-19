@@ -124,4 +124,5 @@ export const PROPS = [
   { url: '/models/books.glb', position: [1.978, 0.39, 5.428], rotation: [0, -3.142, 0], scale: 0.5 },
   { url: '/models/plank.glb', position: [1.964, 0.59, 5.121], rotation: [-0.785, -3.12, 0], scale: 0.7 },
   { url: '/models/rope.glb', position: [1.897, 0.65, 5.766], rotation: [0, 0, 0], scale: 1.6 },
+  { url: '/models/ladder.glb', position: [1.847, 0.15, 3.294], rotation: [0.524, -3.142, 0], scale: 0.35 },
 ];

@@ -16,7 +16,7 @@ import { WORLD_TRANSFORM, GROUND_Y } from './config';
 // Show collider wireframes (floor/walls). Set false for the clean look.
 const DEBUG = true;
 const DEG = Math.PI / 180;
-const PROP_URLS = ['/models/rope.glb', '/models/books.glb', '/models/plank.glb'];
+const PROP_URLS = ['/models/rope.glb', '/models/ladder.glb', '/models/plank.glb'];
 
 const KEYMAP = [
   { name: 'forward', keys: ['ArrowUp', 'KeyW'] },
