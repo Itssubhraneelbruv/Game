@@ -6,14 +6,19 @@ import * as THREE from 'three';
 import { CHARACTER, GROUND_Y, CAM_BOUNDS, PROPS, ROUTE } from '../config';
 
 // Climbables (ladders + ropes) derived from placed props. Both GLBs are ~1.0
-// unit tall at scale 1 with origin at the base, so the top is baseY + scale.
+// unit tall at scale 1 with origin at the base. We compute the base AND top
+// world points (applying the prop's rotation) so the climb follows the ladder's
+// actual lean instead of always going straight up.
 const CLIMB_NATURAL_H = 1.0;
-const LADDERS = PROPS.filter((p) => /ladder|rope/i.test(p.url)).map((p) => ({
-  x: p.position[0],
-  z: p.position[2],
-  baseY: p.position[1],
-  topY: p.position[1] + CLIMB_NATURAL_H * (p.scale ?? 1),
-}));
+const LADDERS = PROPS.filter((p) => /ladder|rope/i.test(p.url)).map((p) => {
+  const s = p.scale ?? 1;
+  const base = new THREE.Vector3(p.position[0], p.position[1], p.position[2]);
+  const up = new THREE.Vector3(0, CLIMB_NATURAL_H * s, 0).applyEuler(
+    new THREE.Euler(...(p.rotation ?? [0, 0, 0]))
+  );
+  const top = base.clone().add(up);
+  return { base: [base.x, base.y, base.z], top: [top.x, top.y, top.z] };
+});
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 // Shortest-path angular lerp.
@@ -26,7 +31,7 @@ function nearestLadder(x, z) {
   let best = null;
   let bestD = Infinity;
   for (const L of LADDERS) {
-    const d = Math.hypot(x - L.x, z - L.z);
+    const d = Math.hypot(x - L.base[0], z - L.base[2]);
     if (d < bestD) {
       bestD = d;
       best = L;
@@ -48,6 +53,7 @@ export default function Character({ active = true }) {
   const heading = useRef(0); // world facing angle (0 = +Z); start facing up the corridor
   const currentClip = useRef(null);
   const climbing = useRef(null); // the ladder/rope being climbed (with locked grab x/z), or null
+  const dismount = useRef(null); // post-climb walk-off { timeLeft, dx, dz }, or null
 
   // Guided-route state.
   const routeIdx = useRef(-1); // current target waypoint (-1 = not started)
@@ -139,14 +145,15 @@ export default function Character({ active = true }) {
     }
 
     // WASD pauses the route and hands back manual control (also drops an
-    // in-progress auto-climb so it doesn't keep rising).
-    if (active && (forward || back || left || right) && !manualOverride.current && routeIdx.current >= 0) {
-      manualOverride.current = true;
+    // in-progress auto-climb / walk-off).
+    if (active && (forward || back || left || right)) {
+      if (routeIdx.current >= 0) manualOverride.current = true;
       if (climbing.current && climbing.current.targetY !== undefined) {
         rb.setBodyType(rapier.RigidBodyType.Dynamic, true);
         rb.setGravityScale(1, true);
         climbing.current = null;
       }
+      dismount.current = null;
     }
 
     // --- Helpers (walk toward a world horizontal dir, or stand still) ---
@@ -191,7 +198,7 @@ export default function Character({ active = true }) {
     // Latch onto a ladder/rope: kinematic (rides straight up, no shove-off),
     // gravity off as a safety, climbing from wherever we grabbed.
     const grabClimb = (L, extra) => {
-      climbing.current = { ...L, gx: t.x, gz: t.z, baseY: Math.min(L.baseY, t.y), ...extra };
+      climbing.current = { ...L, ...extra };
       rb.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
       rb.setGravityScale(0, true);
       rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -202,23 +209,38 @@ export default function Character({ active = true }) {
       const L = climbing.current;
       const auto = L.targetY !== undefined;
       const up = auto ? 1 : f;
-      const newY = clamp(t.y + up * CHARACTER.climbSpeed * dt, L.baseY, L.topY);
-      // Body is kinematic during the climb (set on grab), so it rides straight
-      // up the ladder line and isn't shoved off by the surrounding stack.
-      rb.setNextKinematicTranslation({ x: L.gx, y: newY, z: L.gz });
-      heading.current = Math.atan2(L.x - L.gx, L.z - L.gz); // face the ladder
+      // AUTO climbs to the waypoint's height (the platform top) + an overshoot to
+      // clear the lip — this is usually ABOVE the ladder's own top, so it doesn't
+      // stop at the side of the platform. MANUAL just goes to the ladder top.
+      const ceiling = auto
+        ? Math.max(L.top[1], L.targetY) + (CHARACTER.climbOvershoot ?? 0.1)
+        : L.top[1];
+      const newY = clamp(t.y + up * CHARACTER.climbSpeed * dt, L.base[1], ceiling);
+      // Follow the ladder's actual line (base -> top) by height, so a leaning
+      // ladder carries the fox forward onto the platform, not just straight up.
+      // Above the ladder top the horizontal is clamped (straight up), then the
+      // walk-off carries it forward onto the platform. Kinematic = no shove-off.
+      const span = L.top[1] - L.base[1] || 1;
+      const p = clamp((newY - L.base[1]) / span, 0, 1);
+      const cx = L.base[0] + (L.top[0] - L.base[0]) * p;
+      const cz = L.base[2] + (L.top[2] - L.base[2]) * p;
+      rb.setNextKinematicTranslation({ x: cx, y: newY, z: cz });
+      const hdx = L.top[0] - L.base[0];
+      const hdz = L.top[2] - L.base[2];
+      if (Math.hypot(hdx, hdz) > 0.001) heading.current = Math.atan2(hdx, hdz); // face up the lean
       playClip(names[up !== 0 ? CHARACTER.climbIndex : CHARACTER.idleIndex]);
 
       // Reaching the ladder top: AUTO (route) steps off by itself; MANUAL holds
       // until you keep pushing up (step off) or press Space (drop).
-      const atTop = newY >= L.topY - 1e-3;
+      const atTop = newY >= ceiling - 1e-3;
       const stepOff = !auto && atTop && f > 0;
       const done = auto ? atTop : brake || stepOff;
       if (done) {
         rb.setBodyType(rapier.RigidBodyType.Dynamic, true);
         rb.setGravityScale(1, true);
         if (auto || stepOff) {
-          // Step forward off the top onto the platform, then release the grab.
+          // Walk-off: head onto the platform for a moment, then stop. Grounded
+          // (not a hop) and it halts at an edge, so it won't overshoot and fall.
           // Auto aims at the next route waypoint; manual uses the facing dir.
           let sx = Math.sin(heading.current);
           let sz = Math.cos(heading.current);
@@ -230,11 +252,28 @@ export default function Character({ active = true }) {
             sx = nx / nl;
             sz = nz / nl;
           }
-          rb.setLinvel({ x: sx * CHARACTER.moveSpeed, y: 1.2, z: sz * CHARACTER.moveSpeed }, true);
+          dismount.current = { timeLeft: CHARACTER.dismountTime ?? 1.5, dx: sx, dz: sz };
         }
         const cb = L.onDone;
         climbing.current = null;
         if (cb) cb();
+      }
+    } else if (dismount.current) {
+      // ---- WALK-OFF after a climb: go forward onto the platform, then stop.
+      // Halt early if there's no ground ahead (platform edge) so we don't fall.
+      const D = dismount.current;
+      D.timeLeft -= dt;
+      const ahead = new rapier.Ray(
+        { x: t.x + D.dx * 0.1, y: t.y + 0.12, z: t.z + D.dz * 0.1 },
+        { x: 0, y: -1, z: 0 }
+      );
+      const gh = world.castRay(ahead, 0.5, true, undefined, undefined, undefined, body.current);
+      const groundAhead = gh && (gh.timeOfImpact ?? gh.toi) < 0.35;
+      if (D.timeLeft <= 0 || !groundAhead) {
+        dismount.current = null;
+        standStill();
+      } else {
+        walkDir(D.dx, D.dz);
       }
     } else if (active && routeIdx.current >= 0 && !manualOverride.current) {
       // ---- GUIDED ROUTE: auto-walk/climb toward the current waypoint ----
@@ -245,11 +284,11 @@ export default function Character({ active = true }) {
         const L = nearestLadder(t.x, t.z);
         if (!L) {
           arrived.current = true;
-        } else if (Math.hypot(L.x - t.x, L.z - t.z) < CHARACTER.ladderGrabRange) {
-          // grab and auto-climb from wherever we are up to the target height
+        } else if (Math.hypot(L.base[0] - t.x, L.base[2] - t.z) < CHARACTER.ladderGrabRange) {
+          // grab and auto-climb up the ladder, then step off toward the next wp
           grabClimb(L, { targetY: wp.pos[1], onDone: () => { arrived.current = true; } });
         } else {
-          walkDir(L.x - t.x, L.z - t.z);
+          walkDir(L.base[0] - t.x, L.base[2] - t.z);
         }
       } else {
         const dx = wp.pos[0] - t.x;
@@ -292,7 +331,7 @@ export default function Character({ active = true }) {
         // Grab a ladder: press forward near one.
         if (f > 0) {
           const near = LADDERS.find(
-            (L) => Math.hypot(t.x - L.x, t.z - L.z) < CHARACTER.ladderGrabRange && t.y <= L.topY + 0.1
+            (L) => Math.hypot(t.x - L.base[0], t.z - L.base[2]) < CHARACTER.ladderGrabRange && t.y <= L.top[1] + 0.1
           );
           if (near) grabClimb(near);
         }
@@ -300,7 +339,7 @@ export default function Character({ active = true }) {
       // Allow grabbing while walking into a ladder too.
       if (moving && f > 0) {
         const near = LADDERS.find(
-          (L) => Math.hypot(t.x - L.x, t.z - L.z) < CHARACTER.ladderGrabRange && t.y <= L.topY + 0.1
+          (L) => Math.hypot(t.x - L.base[0], t.z - L.base[2]) < CHARACTER.ladderGrabRange && t.y <= L.top[1] + 0.1
         );
         if (near) grabClimb(near);
       }

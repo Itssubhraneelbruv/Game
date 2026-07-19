@@ -78,6 +78,8 @@ export const CHARACTER = {
   // Ladder climbing:
   climbSpeed: 0.6, // units/sec up/down the ladder
   ladderGrabRange: 0.3, // horizontal distance to grab a ladder
+  dismountTime: 3, // seconds to walk forward off the top of a ladder (stops early at an edge)
+  climbOvershoot: 0.12, // climb this far ABOVE the target height to clear the platform lip before walking on
   // Chase camera: sits 45° up-and-behind, looking down at the head. Kept close.
   camDistance: 0.5, // distance from the head along the 45° line (smaller = closer)
   camAngle: (25 * Math.PI) / 180, // 25° above horizontal
@@ -112,15 +114,14 @@ export const PROPS = [
   { url: '/models/chest.glb', position: [1.997, -0.85, 2.677], rotation: [0, -1.571, 0], scale: 0.45 },
   { url: '/models/bookshelf.glb', position: [1.887, -0.85, 4.566], rotation: [0, -1.571, 0], scale: 2.2 },
   { url: '/models/books.glb', position: [1.898, -0.19, 3.236], rotation: [0, 0, 0], scale: 0.45 },
-  { url: '/models/plank.glb', position: [1.8, -0.48, 2.5], rotation: [0.873, -2.094, 0.785], scale: 0.4 },
-  { url: '/models/plank.glb', position: [2, -0.55, 1.5], rotation: [-0.611, 0, 0], scale: 1.3 },
+  // { url: '/models/plank.glb', position: [1.8, -0.48, 2.5], rotation: [0.873, -2.094, 0.785], scale: 0.4 },
+  { url: '/models/plank.glb', position: [2, -0.67, 1.45], rotation: [-0.698, 0, 0], scale: 1.3 },
   { url: '/models/ladder.glb', position: [1.869, -0.25, 3.04], rotation: [0, 3.142, 0], scale: 0.45 },
-  { url: '/models/ladder.glb', position: [1.942, 0.15, 3.286], rotation: [0.524, -3.142, 0], scale: 0.3 },
   { url: '/models/plank.glb', position: [1.899, 2.15, 5.848], rotation: [0, -1.571, 0], scale: 1.3 },
   { url: '/models/plank.glb', position: [0.699, 2.15, 5.848], rotation: [0, -1.571, 0], scale: 1.3 },
   { url: '/models/plank.glb', position: [-0.601, 2.15, 5.848], rotation: [0, -1.571, 0], scale: 1.3 },
   { url: '/models/plank.glb', position: [-1.701, 2.15, 5.848], rotation: [0, -1.571, 0], scale: 1.3 },
   { url: '/models/books.glb', position: [1.978, 0.39, 5.428], rotation: [0, -3.142, 0], scale: 0.5 },
-  { url: '/models/plank.glb', position: [1.964, 0.59, 5.121], rotation: [-0.785, -3.142, 0], scale: 0.7 },
+  { url: '/models/plank.glb', position: [1.964, 0.59, 5.121], rotation: [-0.785, -3.12, 0], scale: 0.7 },
   { url: '/models/rope.glb', position: [1.897, 0.65, 5.766], rotation: [0, 0, 0], scale: 1.6 },
 ];
